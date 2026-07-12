@@ -1,0 +1,14 @@
+{
+  "name": "CALM Ventas B2B",
+  "short_name": "CALM B2B",
+  "description": "Gestión de cuentas B2B — Rest Company SpA",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f0eb",
+  "theme_color": "#254659",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
