@@ -12,6 +12,17 @@ const CORTE = new Date();
 const MESES_ES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
 function mesesSinComprar(f) { return f ? Math.round((CORTE - new Date(f)) / 2592e6) : null; }
+
+// El estado se calcula SIEMPRE contra hoy, nunca se lee de la base: así un cliente
+// que se enfría aparece solo en "Recuperar" sin que nadie tenga que recalcular nada.
+// Cortes acordados: al día <90 días · dormido 90-180 · perdido >180.
+function clasificar(fechaUltimaCompra) {
+  if (!fechaUltimaCompra) return 'prospecto';
+  const dias = (CORTE - new Date(fechaUltimaCompra)) / 86400000;
+  if (dias < 90) return 'activo';
+  if (dias < 180) return 'dormido';
+  return 'perdido';
+}
 function mesCorto(f) {
   if (!f) return '—';
   const d = new Date(f);
@@ -110,7 +121,11 @@ async function cargar() {
     $('list').innerHTML = `<div class="empty"><div class="ico">⚠️</div>No pude cargar los clientes.<br>${escapeHtml(emp.error.message)}</div>`;
     return;
   }
-  EMPRESAS = emp.data.map(e => ({ ...e, meses: mesesSinComprar(e.fecha_ultima_compra) }));
+  EMPRESAS = emp.data.map(e => ({
+    ...e,
+    meses: mesesSinComprar(e.fecha_ultima_compra),
+    tipo_cliente: clasificar(e.fecha_ultima_compra),
+  }));
   PENDIENTES = acc.data || [];
   render();
   renderHeaderMeta();
