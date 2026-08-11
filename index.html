@@ -57,11 +57,12 @@
     .search::placeholder{color:#a89f92}
 
     /* ===== Tabs (solo 3) ===== */
-    .tabs{display:flex;gap:8px;padding:10px 16px 4px}
-    .tab{flex:1;background:#fff;color:var(--teal);font-size:13.5px;font-weight:600;padding:10px 6px;
+    .tabs{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px 4px}
+    .tab{flex:1 1 28%;background:#fff;color:var(--teal);font-size:13.5px;font-weight:600;padding:10px 6px;
       border-radius:12px;box-shadow:var(--shadow);text-align:center}
     .tab.active{background:var(--navy);color:#fff}
     .tab .n{display:block;font-family:'Poppins';font-size:16px;font-weight:700;margin-top:1px}
+    .canal-chips{display:flex;gap:8px;flex-wrap:wrap;padding:8px 16px 0}
 
     /* ===== Cards ===== */
     .list{padding:8px 16px 90px}
@@ -363,7 +364,17 @@
       <button class="tab" data-f="agenda">📅 Agenda<span class="n" id="n-agenda">—</span></button>
       <button class="tab" data-f="activo">✅ Al día<span class="n" id="n-activo">—</span></button>
       <button class="tab" data-f="todos">📋 Todos<span class="n" id="n-todos">—</span></button>
+      <button class="tab" data-f="prospecto">🧭 Prospectos<span class="n" id="n-prospecto">—</span></button>
       <button class="tab" data-f="analisis">📊 Análisis</button>
+    </div>
+
+    <!-- Filtro por canal (Todos / Prospectos) -->
+    <div class="canal-chips hidden" id="canal-chips">
+      <button class="rec-chip sel" data-canal="">Todos</button>
+      <button class="rec-chip" data-canal="hoteleria_turismo">🏨 Hotelería</button>
+      <button class="rec-chip" data-canal="moteles">🏩 Moteles</button>
+      <button class="rec-chip" data-canal="instituciones">🏛️ Instituciones</button>
+      <button class="rec-chip" data-canal="empresas_wellness">🏢 Wellness</button>
     </div>
 
     <!-- Vista Análisis de productos -->
@@ -509,6 +520,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js?v=11"></script>
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

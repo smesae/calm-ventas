@@ -46,6 +46,11 @@ let EMPRESAS = [];
 let PENDIENTES = [];
 let FILTRO = 'recuperar';
 let BUSCA = '';
+let CANAL = '';   // filtro por canal en Todos/Prospectos ('' = todos)
+const CANAL_LBL = {
+  hoteleria_turismo: '🏨 Hotelería', moteles: '🏩 Motel',
+  instituciones: '🏛️ Institución', empresas_wellness: '🏢 Wellness',
+};
 
 // ==================== AUTH ====================
 let modoSignup = false;
@@ -107,11 +112,25 @@ sb.auth.onAuthStateChange((_e, session) => {
 });
 
 // ==================== DATA ====================
+// Trae TODAS las empresas paginando (Supabase devuelve máx 1.000 por consulta).
+async function cargarEmpresas() {
+  const cols = 'id,rut,nombre,tipo_cliente,canal,telefono,email,comentario,monto_total_hist_clp,cantidad_compras,fecha_ultima_compra';
+  const PAG = 1000; let desde = 0; const todo = [];
+  for (;;) {
+    const { data, error } = await sb.from('empresas').select(cols)
+      .order('monto_total_hist_clp', { ascending: false, nullsFirst: false })
+      .range(desde, desde + PAG - 1);
+    if (error) return { error };
+    todo.push(...data);
+    if (data.length < PAG) break;
+    desde += PAG;
+  }
+  return { data: todo };
+}
+
 async function cargar() {
   const [emp, acc] = await Promise.all([
-    sb.from('empresas')
-      .select('id,rut,nombre,tipo_cliente,telefono,email,comentario,monto_total_hist_clp,cantidad_compras,fecha_ultima_compra')
-      .order('monto_total_hist_clp', { ascending: false }),
+    cargarEmpresas(),
     sb.from('acciones')
       .select('id,empresa_id,tipo,titulo,fecha_programada,prioridad')
       .eq('estado', 'pendiente')
@@ -174,6 +193,8 @@ function render() {
   $('n-activo').textContent = act.length;
   $('n-agenda').textContent = PENDIENTES.length;
   $('n-todos').textContent = EMPRESAS.length;
+  const pros = EMPRESAS.filter(e => e.tipo_cliente === 'prospecto');
+  if ($('n-prospecto')) $('n-prospecto').textContent = pros.length;
 
   // Mostrar/ocultar contenedores según pestaña
   const esAnalisis = FILTRO === 'analisis';
@@ -181,16 +202,26 @@ function render() {
   $('list').classList.toggle('hidden', esAnalisis);
   $('kpi').classList.toggle('hidden', esAnalisis);
   document.querySelector('.search-wrap').classList.toggle('hidden', esAnalisis);
+  // Chips de canal: solo en Todos y Prospectos
+  const conCanal = FILTRO === 'todos' || FILTRO === 'prospecto';
+  if ($('canal-chips')) $('canal-chips').classList.toggle('hidden', !conCanal);
   if (esAnalisis) { renderAnalisis(); return; }
 
   if (FILTRO === 'agenda') { renderAgenda(); return; }
 
-  let items = FILTRO === 'recuperar' ? rec : FILTRO === 'activo' ? act : EMPRESAS;
+  let items = FILTRO === 'recuperar' ? rec
+            : FILTRO === 'activo' ? act
+            : FILTRO === 'prospecto' ? pros
+            : EMPRESAS;
+  if (conCanal && CANAL) items = items.filter(e => e.canal === CANAL);
   if (BUSCA) {
     const q = BUSCA.toLowerCase();
     items = items.filter(e => (e.nombre || '').toLowerCase().includes(q) || (e.rut || '').includes(q));
   }
-  items = items.slice().sort((a, b) => Number(b.monto_total_hist_clp) - Number(a.monto_total_hist_clp));
+  // Prospectos se ordenan por nombre; el resto por plata
+  items = FILTRO === 'prospecto'
+    ? items.slice().sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''))
+    : items.slice().sort((a, b) => Number(b.monto_total_hist_clp) - Number(a.monto_total_hist_clp));
 
   const cont = $('list');
   if (!items.length) {
@@ -200,9 +231,16 @@ function render() {
     return;
   }
 
-  const hint = FILTRO === 'recuperar'
-    ? `<div class="hint">Ordenados por lo que más plata dejaron. Parte por arriba 👇</div>` : '';
-  cont.innerHTML = hint + items.map(cardHTML).join('');
+  // Tope de render (rendimiento): con miles de fichas no se pintan todas de una
+  const TOPE = 200;
+  const total = items.length;
+  const visibles = items.slice(0, TOPE);
+  let hint = '';
+  if (FILTRO === 'recuperar') hint = `<div class="hint">Ordenados por lo que más plata dejaron. Parte por arriba 👇</div>`;
+  else if (FILTRO === 'prospecto') hint = `<div class="hint">Prospectos de Pipedrive — aún no te han comprado (${total}).</div>`;
+  const masNota = total > TOPE
+    ? `<div class="hint" style="margin-top:10px">Mostrando ${TOPE} de ${total}. Usa el buscador 🔍 o filtra por canal para acotar.</div>` : '';
+  cont.innerHTML = hint + visibles.map(cardHTML).join('') + masNota;
   wireCards(cont);
 }
 
@@ -218,6 +256,7 @@ function wireCards(cont) {
 }
 
 function lineaEstado(e) {
+  if (e.tipo_cliente === 'prospecto') return `<span style="color:var(--teal);font-weight:600">🧭 ${CANAL_LBL[e.canal] || 'Prospecto'}</span>`;
   if (e.tipo_cliente === 'activo') return `<span class="ok">✓ Compró hace poco</span> (${mesCorto(e.fecha_ultima_compra)})`;
   if (e.meses == null) return 'Sin compras registradas';
   const clase = e.tipo_cliente === 'perdido' ? 'alerta' : 'alerta suave';
@@ -230,6 +269,9 @@ function cardHTML(e) {
     ? `<a class="btn btn-call" href="tel:${telLimpio}" data-call="${e.id}">📞 Llamar</a>`
     : `<button class="btn btn-tel-add" data-addtel="${e.id}">➕ Poner teléfono</button>`;
   const memo = e.comentario ? `<div class="c-memo">📌 ${escapeHtml(e.comentario.slice(0, 90))}${e.comentario.length > 90 ? '…' : ''}</div>` : '';
+  const infoMonto = e.tipo_cliente === 'prospecto'
+    ? ''
+    : `<div class="c-monto">Nos ha comprado <b>${clp(e.monto_total_hist_clp)}</b> en total</div>`;
   return `
   <div class="card ${e.tipo_cliente}">
     <div class="c-tap" data-ficha="${e.id}">
@@ -238,7 +280,7 @@ function cardHTML(e) {
         <div class="c-ver">Ver ficha ›</div>
       </div>
       <div class="c-line">${lineaEstado(e)}</div>
-      <div class="c-monto">Nos ha comprado <b>${clp(e.monto_total_hist_clp)}</b> en total</div>
+      ${infoMonto}
       ${memo}
     </div>
     <div class="c-actions">
@@ -935,6 +977,18 @@ $('tabs').querySelectorAll('.tab').forEach(t => {
   };
 });
 $('search').oninput = (e) => { BUSCA = e.target.value.trim(); render(); };
+
+// Chips de canal (Todos / Prospectos)
+if ($('canal-chips')) {
+  $('canal-chips').querySelectorAll('.rec-chip').forEach(c => {
+    c.onclick = () => {
+      $('canal-chips').querySelectorAll('.rec-chip').forEach(x => x.classList.remove('sel'));
+      c.classList.add('sel');
+      CANAL = c.dataset.canal;
+      render();
+    };
+  });
+}
 
 // ==================== PWA ====================
 // Durante desarrollo: desregistrar cualquier service worker viejo para que
