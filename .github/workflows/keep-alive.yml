@@ -1,23 +1,29 @@
 name: keep-alive
 
-# Mantiene despierta la base de Supabase para que NO se pause por inactividad
-# (el plan gratuito se duerme tras ~7 días sin actividad y la app deja de cargar).
-# Corre cada 3 días y también se puede lanzar a mano desde la pestaña Actions.
+# Mantiene despierta la base de Supabase (plan gratuito) para que NO se pause por
+# inactividad y la app no se le caiga a Macarena.
+# Llama a la función public.ping(), que hace una ESCRITURA real en la base
+# (actividad inequívoca). El ping de solo-lectura anterior no bastaba: chocaba con
+# permisos (42501) y Supabase no lo contaba como actividad.
+# Corre cada 2 días y también se puede lanzar a mano desde la pestaña Actions.
 
 on:
   schedule:
-    - cron: '0 12 */3 * *'   # cada 3 días, 12:00 UTC
-  workflow_dispatch: {}       # botón para ejecutarlo manualmente
+    - cron: '0 12 */2 * *'   # cada 2 días, 12:00 UTC (margen: la pausa es a los 7 días)
+  workflow_dispatch: {}
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST (cuenta como actividad de base de datos)
+      - name: Ping Supabase — escritura real vía RPC public.ping()
         run: |
-          URL="https://ypsjydadpejmoyqkeaos.supabase.co/rest/v1/empresas?select=id&limit=1"
+          URL="https://ypsjydadpejmoyqkeaos.supabase.co/rest/v1/rpc/ping"
           KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlwc2p5ZGFkcGVqbW95cWtlYW9zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2NzI0OTgsImV4cCI6MjA5OTI0ODQ5OH0.J5NR5S2_5j-toJMCwL5P7ZaL2UMQHGGT_0vr1CyWRkw"
-          code=$(curl -sS -o /dev/null -w "%{http_code}" "$URL" -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
-          echo "Supabase respondió HTTP $code"
-          # 200 o 401 = la base recibió y procesó la consulta (sigue viva). Solo fallar si no respondió.
-          if [ "$code" = "000" ]; then echo "Sin respuesta de Supabase"; exit 1; fi
+          resp=$(curl -sS -X POST "$URL" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" -d '{}')
+          echo "Respuesta de ping(): $resp"
+          # La función devuelve un timestamp entre comillas, p.ej. "2026-08-27T15:00:51...".
+          echo "$resp" | grep -qE '^"20[0-9][0-9]-' || { echo "ping() no devolvió timestamp — revisar"; exit 1; }
+          echo "OK: la base recibió una escritura y sigue viva."
