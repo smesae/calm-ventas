@@ -114,7 +114,7 @@ sb.auth.onAuthStateChange((_e, session) => {
 // ==================== DATA ====================
 // Trae TODAS las empresas paginando (Supabase devuelve máx 1.000 por consulta).
 async function cargarEmpresas() {
-  const cols = 'id,rut,nombre,tipo_cliente,canal,telefono,email,comentario,monto_total_hist_clp,cantidad_compras,fecha_ultima_compra';
+  const cols = 'id,rut,nombre,razon_social,tipo_cliente,canal,telefono,email,comentario,direccion,comuna,camas,habitaciones,giro,monto_total_hist_clp,cantidad_compras,fecha_ultima_compra';
   const PAG = 1000; let desde = 0; const todo = [];
   for (;;) {
     const { data, error } = await sb.from('empresas').select(cols)
@@ -209,14 +209,21 @@ function render() {
 
   if (FILTRO === 'agenda') { renderAgenda(); return; }
 
-  let items = FILTRO === 'recuperar' ? rec
-            : FILTRO === 'activo' ? act
-            : FILTRO === 'prospecto' ? pros
-            : EMPRESAS;
-  if (conCanal && CANAL) items = items.filter(e => e.canal === CANAL);
+  let items;
   if (BUSCA) {
+    // Búsqueda GLOBAL: busca en TODA la base (clientes + prospectos), sin importar la pestaña.
     const q = BUSCA.toLowerCase();
-    items = items.filter(e => (e.nombre || '').toLowerCase().includes(q) || (e.rut || '').includes(q));
+    items = EMPRESAS.filter(e =>
+      (e.nombre || '').toLowerCase().includes(q) ||
+      (e.razon_social || '').toLowerCase().includes(q) ||
+      (e.rut || '').includes(q) ||
+      (e.comuna || '').toLowerCase().includes(q));
+  } else {
+    items = FILTRO === 'recuperar' ? rec
+          : FILTRO === 'activo' ? act
+          : FILTRO === 'prospecto' ? pros
+          : EMPRESAS;
+    if (conCanal && CANAL) items = items.filter(e => e.canal === CANAL);
   }
   // Prospectos se ordenan por nombre; el resto por plata
   items = FILTRO === 'prospecto'
@@ -236,7 +243,8 @@ function render() {
   const total = items.length;
   const visibles = items.slice(0, TOPE);
   let hint = '';
-  if (FILTRO === 'recuperar') hint = `<div class="hint">Ordenados por lo que más plata dejaron. Parte por arriba 👇</div>`;
+  if (BUSCA) hint = `<div class="hint">🔎 ${total} resultado${total===1?'':'s'} en toda la base (clientes y prospectos).</div>`;
+  else if (FILTRO === 'recuperar') hint = `<div class="hint">Ordenados por lo que más plata dejaron. Parte por arriba 👇</div>`;
   else if (FILTRO === 'prospecto') hint = `<div class="hint">Prospectos de Pipedrive — aún no te han comprado (${total}).</div>`;
   const masNota = total > TOPE
     ? `<div class="hint" style="margin-top:10px">Mostrando ${TOPE} de ${total}. Usa el buscador 🔍 o filtra por canal para acotar.</div>` : '';
@@ -729,6 +737,21 @@ async function abrirFicha(id) {
   if (addTelBtn) addTelBtn.onclick = () => { cerrarFicha(); abrirTel(id); };
   $('f-recordar').onclick = () => abrirRecordar(id);
 
+  // Datos del cliente (RUT, giro, dirección, camas, habitaciones…)
+  const datos = [];
+  if (e.razon_social && e.razon_social.toLowerCase() !== (e.nombre || '').toLowerCase()) datos.push(['Razón social', e.razon_social]);
+  if (e.rut) datos.push(['RUT', e.rut]);
+  if (CANAL_LBL[e.canal]) datos.push(['Rubro', CANAL_LBL[e.canal].replace(/^\S+\s/, '')]);
+  if (e.giro) datos.push(['Giro', e.giro]);
+  if (e.direccion) datos.push(['Dirección', e.direccion + (e.comuna ? ', ' + e.comuna : '')]);
+  else if (e.comuna) datos.push(['Comuna', e.comuna]);
+  if (e.habitaciones) datos.push(['Habitaciones', e.habitaciones]);
+  if (e.camas) datos.push(['Camas', e.camas]);
+  $('f-datos').innerHTML = datos.length
+    ? `<div class="sec-title">📋 Datos del cliente</div>` +
+      datos.map(([k, v]) => `<div class="dato-row"><span class="dato-k">${k}</span><span class="dato-v">${escapeHtml(String(v))}</span></div>`).join('')
+    : '';
+
   // Memoria de Pipedrive
   $('f-memo').innerHTML = e.comentario
     ? `<div class="sec-title">📌 Lo que sabemos del cliente</div><div class="nota-row memo">${escapeHtml(e.comentario)}</div>`
@@ -742,7 +765,7 @@ async function abrirFicha(id) {
   $('ficha').classList.remove('hidden');
 
   const [cont, tx, gest, notas] = await Promise.all([
-    sb.from('contactos').select('nombre,telefono,email').eq('empresa_id', id).order('created_at'),
+    sb.from('contactos').select('nombre,apellido,cargo,telefono,email,es_decisor').eq('empresa_id', id).order('es_decisor', { ascending: false }),
     sb.from('transacciones').select('fecha_emision,mes,monto_neto_clp,unidades,producto,sku')
       .eq('empresa_id', id).order('fecha_emision', { ascending: false }).limit(300),
     sb.from('acciones').select('titulo,resultado,fecha_completada,tipo')
@@ -756,8 +779,10 @@ async function abrirFicha(id) {
   $('f-contactos').innerHTML = (cont.data && cont.data.length)
     ? `<div class="sec-title">👤 Personas de contacto</div>` + cont.data.map(c => {
         const t = (c.telefono || '').replace(/[^\d+]/g, '');
+        const nombreCompleto = [c.nombre, c.apellido].filter(Boolean).join(' ');
         return `<div class="ctc-row">
-          <div class="ctc-nombre">${escapeHtml(c.nombre)}</div>
+          <div class="ctc-nombre">${escapeHtml(nombreCompleto)}${c.es_decisor ? ' ⭐' : ''}</div>
+          ${c.cargo ? `<div class="ctc-cargo">${escapeHtml(c.cargo)}</div>` : ''}
           <div class="ctc-datos">
             ${c.telefono ? `<a href="tel:${t}">📞 ${escapeHtml(c.telefono)}</a>` : ''}
             ${c.email ? `<a href="mailto:${escapeHtml(c.email)}">✉️ ${escapeHtml(c.email)}</a>` : ''}
