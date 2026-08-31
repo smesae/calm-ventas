@@ -776,8 +776,8 @@ async function abrirFicha(id) {
   ]);
 
   // Personas de contacto
-  $('f-contactos').innerHTML = (cont.data && cont.data.length)
-    ? `<div class="sec-title">👤 Personas de contacto</div>` + cont.data.map(c => {
+  const filasCtc = (cont.data && cont.data.length)
+    ? cont.data.map(c => {
         const t = (c.telefono || '').replace(/[^\d+]/g, '');
         const nombreCompleto = [c.nombre, c.apellido].filter(Boolean).join(' ');
         return `<div class="ctc-row">
@@ -789,7 +789,10 @@ async function abrirFicha(id) {
           </div>
         </div>`;
       }).join('')
-    : '';
+    : `<div class="hint" style="padding:0 0 4px">Aún no hay contactos guardados.</div>`;
+  $('f-contactos').innerHTML = `<div class="sec-title">👤 Personas de contacto</div>` + filasCtc +
+    `<button class="btn" id="f-add-ctc" style="width:100%;background:var(--cream);color:var(--navy);margin-top:6px">➕ Agregar contacto</button>`;
+  $('f-add-ctc').onclick = () => abrirContacto(id);
 
   // Historial de compras por mes — con desglose de productos al tocar
   if (tx.data && tx.data.length) {
@@ -990,6 +993,36 @@ $('t-save').onclick = async () => {
   $('telmodal').classList.add('hidden');
   toast('Teléfono guardado ✓');
   render();
+};
+
+// ==================== AGREGAR CONTACTO ====================
+let ctcEmpId = null;
+function abrirContacto(id) {
+  ctcEmpId = id;
+  const e = EMPRESAS.find(x => x.id === id);
+  $('ctc-sub').textContent = e ? e.nombre : '';
+  $('ctc-nombre').value = ''; $('ctc-cargo').value = ''; $('ctc-tel').value = ''; $('ctc-email').value = '';
+  cerrarFicha();
+  $('ctcmodal').classList.remove('hidden');
+  setTimeout(() => $('ctc-nombre').focus(), 150);
+}
+$('ctc-cancel').onclick = () => { $('ctcmodal').classList.add('hidden'); if (ctcEmpId) abrirFicha(ctcEmpId); };
+$('ctcmodal').onclick = (e) => { if (e.target === $('ctcmodal')) $('ctc-cancel').onclick(); };
+$('ctc-save').onclick = async () => {
+  const nombre = $('ctc-nombre').value.trim();
+  if (!nombre) { toast('Escribe al menos el nombre'); return; }
+  const cargo = $('ctc-cargo').value || null;
+  const row = {
+    empresa_id: ctcEmpId, nombre, cargo,
+    telefono: $('ctc-tel').value.trim() || null,
+    email: $('ctc-email').value.trim() || null,
+    es_decisor: ['Dueño(a)', 'Gerente(a)', 'Administrador(a)', 'Socio'].includes(cargo),
+  };
+  const { error } = await sb.from('contactos').insert(row);
+  if (error) { toast('⚠️ No se pudo guardar'); return; }
+  $('ctcmodal').classList.add('hidden');
+  toast('Contacto guardado ✓');
+  if (ctcEmpId) abrirFicha(ctcEmpId);
 };
 
 // ==================== TABS + BUSCADOR ====================

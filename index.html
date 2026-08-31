@@ -98,9 +98,9 @@
     .brand .tag{font-size:13px;color:var(--teal);margin-top:4px;letter-spacing:2px;text-transform:uppercase}
     .field{margin-bottom:14px}
     .field label{display:block;font-size:12.5px;font-weight:600;color:var(--teal);margin-bottom:5px}
-    .field input,.field textarea{width:100%;padding:13px 14px;border:1.5px solid var(--cream);border-radius:11px;
+    .field input,.field textarea,.field select{width:100%;padding:13px 14px;border:1.5px solid var(--cream);border-radius:11px;
       font-size:15px;font-family:inherit;background:#fff;color:var(--navy)}
-    .field input:focus,.field textarea:focus{outline:none;border-color:var(--olive)}
+    .field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--olive)}
     .login-btn{width:100%;background:var(--navy);color:#fff;padding:14px;border-radius:11px;
       font-size:15px;font-weight:600;font-family:'Poppins';margin-top:6px}
     .login-btn:disabled{opacity:.6}
@@ -524,8 +524,32 @@
     </div>
   </div>
 
+  <div id="ctcmodal" class="sheet-bg hidden">
+    <div class="sheet">
+      <div class="grab"></div>
+      <h2>Agregar contacto</h2>
+      <div class="sub" id="ctc-sub"></div>
+      <div class="field"><input id="ctc-nombre" type="text" placeholder="Nombre y apellido"></div>
+      <div class="field"><select id="ctc-cargo">
+        <option value="">— Cargo (opcional) —</option>
+        <option>Dueño(a)</option>
+        <option>Gerente(a)</option>
+        <option>Administrador(a)</option>
+        <option>Compras y Adquisiciones</option>
+        <option>Recepción</option>
+        <option>Otros</option>
+      </select></div>
+      <div class="field"><input id="ctc-tel" type="tel" placeholder="Teléfono"></div>
+      <div class="field"><input id="ctc-email" type="email" placeholder="Email (opcional)"></div>
+      <div class="modal-actions">
+        <button class="m-cancel" id="ctc-cancel">Cancelar</button>
+        <button class="m-save" id="ctc-save">Guardar</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js?v=11"></script>
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>
