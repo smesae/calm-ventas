@@ -51,6 +51,8 @@ const CANAL_LBL = {
   hoteleria_turismo: '🏨 Hotelería', moteles: '🏩 Motel',
   instituciones: '🏛️ Institución', empresas_wellness: '🏢 Wellness',
 };
+// Título a mostrar: nombre comercial (fantasía) si existe, si no la razón social.
+const nombreMostrar = (e) => (e && (e.nombre_fantasia || e.nombre)) || '';
 
 // ==================== AUTH ====================
 let modoSignup = false;
@@ -114,7 +116,7 @@ sb.auth.onAuthStateChange((_e, session) => {
 // ==================== DATA ====================
 // Trae TODAS las empresas paginando (Supabase devuelve máx 1.000 por consulta).
 async function cargarEmpresas() {
-  const cols = 'id,rut,nombre,razon_social,tipo_cliente,canal,telefono,email,comentario,direccion,comuna,camas,habitaciones,giro,monto_total_hist_clp,cantidad_compras,fecha_ultima_compra';
+  const cols = 'id,rut,nombre,nombre_fantasia,razon_social,grupo_relacionados,tipo_cliente,canal,telefono,email,comentario,direccion,comuna,camas,habitaciones,giro,monto_total_hist_clp,cantidad_compras,fecha_ultima_compra';
   const PAG = 1000; let desde = 0; const todo = [];
   for (;;) {
     const { data, error } = await sb.from('empresas').select(cols)
@@ -214,8 +216,10 @@ function render() {
     // Búsqueda GLOBAL: busca en TODA la base (clientes + prospectos), sin importar la pestaña.
     const q = BUSCA.toLowerCase();
     items = EMPRESAS.filter(e =>
+      (e.nombre_fantasia || '').toLowerCase().includes(q) ||
       (e.nombre || '').toLowerCase().includes(q) ||
       (e.razon_social || '').toLowerCase().includes(q) ||
+      (e.grupo_relacionados || '').toLowerCase().includes(q) ||
       (e.rut || '').includes(q) ||
       (e.comuna || '').toLowerCase().includes(q));
   } else {
@@ -284,7 +288,7 @@ function cardHTML(e) {
   <div class="card ${e.tipo_cliente}">
     <div class="c-tap" data-ficha="${e.id}">
       <div class="c-top">
-        <div class="c-name">${escapeHtml(e.nombre)}</div>
+        <div class="c-name">${escapeHtml(nombreMostrar(e))}</div>
         <div class="c-ver">Ver ficha ›</div>
       </div>
       <div class="c-line">${lineaEstado(e)}</div>
@@ -320,7 +324,7 @@ function renderAgenda() {
     else if (f < finMes) grupos.mes.push(a);
     else grupos.despues.push(a);
   }
-  const nombres = Object.fromEntries(EMPRESAS.map(e => [e.id, e.nombre]));
+  const nombres = Object.fromEntries(EMPRESAS.map(e => [e.id, nombreMostrar(e)]));
   const seccion = (titulo, items, clase) => !items.length ? '' : `
     <div class="ag-sec ${clase || ''}">${titulo} <span class="ag-n">${items.length}</span></div>
     ${items.map(a => agendaItemHTML(a, nombres)).join('')}`;
@@ -720,8 +724,9 @@ async function abrirFicha(id) {
   fichaId = id;
   const e = EMPRESAS.find(x => x.id === id);
   if (!e) return;
-  $('f-nombre').textContent = e.nombre;
-  $('f-sub').textContent = (e.rut ? 'RUT ' + e.rut : 'Sin RUT') + ' · ' +
+  $('f-nombre').textContent = nombreMostrar(e);
+  const razonSoc = e.nombre_fantasia ? (e.razon_social || e.nombre) : null;
+  $('f-sub').textContent = (razonSoc ? razonSoc + ' · ' : '') + (e.rut ? 'RUT ' + e.rut : 'Sin RUT') + ' · ' +
     ({ activo: 'Cliente al día ✓', dormido: 'Dejó de comprar 😴', perdido: 'Cliente perdido 💤', prospecto: 'Prospecto' }[e.tipo_cliente] || '');
   $('f-total').textContent = clp(e.monto_total_hist_clp);
   $('f-compras').textContent = e.cantidad_compras;
@@ -747,10 +752,15 @@ async function abrirFicha(id) {
   else if (e.comuna) datos.push(['Comuna', e.comuna]);
   if (e.habitaciones) datos.push(['Habitaciones', e.habitaciones]);
   if (e.camas) datos.push(['Camas', e.camas]);
-  $('f-datos').innerHTML = datos.length
+  const bloqueDatos = datos.length
     ? `<div class="sec-title">📋 Datos del cliente</div>` +
       datos.map(([k, v]) => `<div class="dato-row"><span class="dato-k">${k}</span><span class="dato-v">${escapeHtml(String(v))}</span></div>`).join('')
     : '';
+  const bloqueGrupo = e.grupo_relacionados
+    ? `<div class="sec-title" style="margin-top:12px">🏨 Otros locales del mismo dueño</div>` +
+      `<div class="grupo-rel">${e.grupo_relacionados.split('·').map(h => `<span class="grupo-chip">${escapeHtml(h.trim())}</span>`).join('')}</div>`
+    : '';
+  $('f-datos').innerHTML = bloqueDatos + bloqueGrupo;
 
   // Memoria de Pipedrive
   $('f-memo').innerHTML = e.comentario
@@ -878,7 +888,7 @@ function abrirResultado(empresaId, accionId) {
   resId = empresaId;
   resAccionPendiente = accionId || null;
   const e = EMPRESAS.find(x => x.id === empresaId);
-  $('r-sub').textContent = e ? e.nombre : '';
+  $('r-sub').textContent = e ? nombreMostrar(e) : '';
   $('resmodal').classList.remove('hidden');
 }
 $('r-cancel').onclick = () => $('resmodal').classList.add('hidden');
@@ -898,7 +908,7 @@ document.querySelectorAll('.res-opt').forEach(b => {
     } else {
       await sb.from('acciones').insert({
         empresa_id: resId, tipo: 'llamar',
-        titulo: `Llamada a ${e ? e.nombre : 'cliente'}`,
+        titulo: `Llamada a ${e ? nombreMostrar(e) : 'cliente'}`,
         estado: 'completada', resultado: r.txt,
         fecha_programada: new Date().toISOString(),
         fecha_completada: new Date().toISOString(),
@@ -976,7 +986,7 @@ let telId = null;
 function abrirTel(id) {
   telId = id;
   const e = EMPRESAS.find(x => x.id === id);
-  $('t-sub').textContent = e ? e.nombre : '';
+  $('t-sub').textContent = e ? nombreMostrar(e) : '';
   $('t-tel').value = '';
   $('telmodal').classList.remove('hidden');
   setTimeout(() => $('t-tel').focus(), 150);
@@ -1000,7 +1010,7 @@ let ctcEmpId = null;
 function abrirContacto(id) {
   ctcEmpId = id;
   const e = EMPRESAS.find(x => x.id === id);
-  $('ctc-sub').textContent = e ? e.nombre : '';
+  $('ctc-sub').textContent = e ? nombreMostrar(e) : '';
   $('ctc-nombre').value = ''; $('ctc-cargo').value = ''; $('ctc-tel').value = ''; $('ctc-email').value = '';
   cerrarFicha();
   $('ctcmodal').classList.remove('hidden');
