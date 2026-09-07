@@ -742,25 +742,37 @@ async function abrirFicha(id) {
   if (addTelBtn) addTelBtn.onclick = () => { cerrarFicha(); abrirTel(id); };
   $('f-recordar').onclick = () => abrirRecordar(id);
 
-  // Datos del cliente (RUT, giro, dirección, camas, habitaciones…)
-  const datos = [];
-  if (e.razon_social && e.razon_social.toLowerCase() !== (e.nombre || '').toLowerCase()) datos.push(['Razón social', e.razon_social]);
-  if (e.rut) datos.push(['RUT', e.rut]);
-  if (CANAL_LBL[e.canal]) datos.push(['Rubro', CANAL_LBL[e.canal].replace(/^\S+\s/, '')]);
-  if (e.giro) datos.push(['Giro', e.giro]);
-  if (e.direccion) datos.push(['Dirección', e.direccion + (e.comuna ? ', ' + e.comuna : '')]);
-  else if (e.comuna) datos.push(['Comuna', e.comuna]);
-  if (e.habitaciones) datos.push(['Habitaciones', e.habitaciones]);
-  if (e.camas) datos.push(['Camas', e.camas]);
-  const bloqueDatos = datos.length
-    ? `<div class="sec-title">📋 Datos del cliente</div>` +
-      datos.map(([k, v]) => `<div class="dato-row"><span class="dato-k">${k}</span><span class="dato-v">${escapeHtml(String(v))}</span></div>`).join('')
-    : '';
+  // Datos de facturación (razón social, RUT, giro, dirección) + datos operativos del cliente
+  const rowHtml = (arr) => arr.map(([k, v]) => `<div class="dato-row"><span class="dato-k">${k}</span><span class="dato-v">${escapeHtml(String(v))}</span></div>`).join('');
+  const factura = [];
+  if (e.razon_social && e.razon_social.toLowerCase() !== (e.nombre || '').toLowerCase()) factura.push(['Razón social', e.razon_social]);
+  if (e.rut) factura.push(['RUT', e.rut]);
+  if (e.giro) factura.push(['Giro', e.giro]);
+  if (e.direccion) factura.push(['Dirección', e.direccion + (e.comuna ? ', ' + e.comuna : '')]);
+  else if (e.comuna) factura.push(['Comuna', e.comuna]);
+  const cliente = [];
+  if (CANAL_LBL[e.canal]) cliente.push(['Rubro', CANAL_LBL[e.canal].replace(/^\S+\s/, '')]);
+  if (e.habitaciones) cliente.push(['Habitaciones', e.habitaciones]);
+  if (e.camas) cliente.push(['Camas', e.camas]);
+  window.__factTxt = factura.map(([k, v]) => `${k}: ${v}`).join('\n');
+  const btnCopiar = '<button id="f-copiar-fact" style="float:right;font-size:11px;font-weight:600;padding:3px 9px;border:1px solid var(--olive);background:transparent;color:var(--olive);border-radius:8px;cursor:pointer">📋 Copiar</button>';
+  const bloqueFactura = factura.length
+    ? `<div class="sec-title">🧾 Datos de facturación ${btnCopiar}</div>` + rowHtml(factura) : '';
+  const bloqueCliente = cliente.length
+    ? `<div class="sec-title"${factura.length ? ' style="margin-top:14px"' : ''}>📋 Datos del cliente</div>` + rowHtml(cliente) : '';
+  const bloqueDatos = bloqueFactura + bloqueCliente;
   const bloqueGrupo = e.grupo_relacionados
     ? `<div class="sec-title" style="margin-top:12px">🏨 Otros locales del mismo dueño</div>` +
       `<div class="grupo-rel">${e.grupo_relacionados.split('·').map(h => `<span class="grupo-chip">${escapeHtml(h.trim())}</span>`).join('')}</div>`
     : '';
   $('f-datos').innerHTML = bloqueDatos + bloqueGrupo;
+  const btnFact = $('f-copiar-fact');
+  if (btnFact) btnFact.onclick = () => {
+    navigator.clipboard.writeText(window.__factTxt || '').then(() => {
+      btnFact.textContent = '✓ Copiado';
+      setTimeout(() => { btnFact.textContent = '📋 Copiar'; }, 1500);
+    }).catch(() => {});
+  };
 
   // Memoria de Pipedrive
   $('f-memo').innerHTML = e.comentario
