@@ -44,6 +44,9 @@ function toast(txt) {
 
 let EMPRESAS = [];
 let PENDIENTES = [];
+let CONTACTOS_IDX = {};   // empresa_id -> "nombre apellido …" (para buscar por persona de contacto)
+let FICHA_CTCS = [];      // contactos cargados de la ficha abierta (para editar/borrar)
+let FICHA_NOTAS = [];     // notas cargadas de la ficha abierta (para editar/borrar)
 let FILTRO = 'recuperar';
 let BUSCA = '';
 let CANAL = '';   // filtro por canal en Todos/Prospectos ('' = todos)
@@ -130,13 +133,32 @@ async function cargarEmpresas() {
   return { data: todo };
 }
 
+// Índice de nombres de contacto por empresa → permite buscar un cliente por el
+// nombre de las personas que trabajan ahí. Pagina porque hay >1.000 contactos.
+async function cargarContactosIdx() {
+  const PAG = 1000; let desde = 0; const map = {};
+  for (;;) {
+    const { data, error } = await sb.from('contactos').select('empresa_id,nombre,apellido').range(desde, desde + PAG - 1);
+    if (error || !data) break;
+    for (const c of data) {
+      const t = ((c.nombre || '') + ' ' + (c.apellido || '')).toLowerCase().replace(/\s+/g, ' ').trim();
+      if (!t) continue;
+      map[c.empresa_id] = map[c.empresa_id] ? map[c.empresa_id] + ' · ' + t : t;
+    }
+    if (data.length < PAG) break;
+    desde += PAG;
+  }
+  return map;
+}
+
 async function cargar() {
-  const [emp, acc] = await Promise.all([
+  const [emp, acc, ctcs] = await Promise.all([
     cargarEmpresas(),
     sb.from('acciones')
       .select('id,empresa_id,tipo,titulo,fecha_programada,prioridad')
       .eq('estado', 'pendiente')
       .order('fecha_programada'),
+    cargarContactosIdx(),
   ]);
   if (emp.error) {
     $('list').innerHTML = `<div class="empty"><div class="ico">⚠️</div>No pude cargar los clientes.<br>${escapeHtml(emp.error.message)}</div>`;
@@ -148,6 +170,7 @@ async function cargar() {
     tipo_cliente: clasificar(e.fecha_ultima_compra),
   }));
   PENDIENTES = acc.data || [];
+  CONTACTOS_IDX = ctcs || {};
   render();
   renderHeaderMeta();
 }
@@ -221,7 +244,8 @@ function render() {
       (e.razon_social || '').toLowerCase().includes(q) ||
       (e.grupo_relacionados || '').toLowerCase().includes(q) ||
       (e.rut || '').includes(q) ||
-      (e.comuna || '').toLowerCase().includes(q));
+      (e.comuna || '').toLowerCase().includes(q) ||
+      (CONTACTOS_IDX[e.id] || '').includes(q));   // buscar también por nombre de la persona de contacto
   } else {
     items = FILTRO === 'recuperar' ? rec
           : FILTRO === 'activo' ? act
@@ -750,16 +774,18 @@ async function abrirFicha(id) {
   if (e.giro) factura.push(['Giro', e.giro]);
   if (e.direccion) factura.push(['Dirección', e.direccion + (e.comuna ? ', ' + e.comuna : '')]);
   else if (e.comuna) factura.push(['Comuna', e.comuna]);
+  // Datos operativos — SIEMPRE visibles (camas y habitaciones incluidas aunque estén vacías) y editables
+  const camasVal = (e.camas != null && e.camas !== '') ? e.camas : '—';
+  const habVal = (e.habitaciones != null && e.habitaciones !== '') ? e.habitaciones : '—';
   const cliente = [];
   if (CANAL_LBL[e.canal]) cliente.push(['Rubro', CANAL_LBL[e.canal].replace(/^\S+\s/, '')]);
-  if (e.habitaciones) cliente.push(['Habitaciones', e.habitaciones]);
-  if (e.camas) cliente.push(['Camas', e.camas]);
+  cliente.push(['🛏️ N° de camas', camasVal]);
+  cliente.push(['Habitaciones', habVal]);
   window.__factTxt = factura.map(([k, v]) => `${k}: ${v}`).join('\n');
-  const btnCopiar = '<button id="f-copiar-fact" style="float:right;font-size:11px;font-weight:600;padding:3px 9px;border:1px solid var(--olive);background:transparent;color:var(--olive);border-radius:8px;cursor:pointer">📋 Copiar</button>';
+  const btnCopiar = '<button id="f-copiar-fact" style="float:right;margin-left:8px;font-size:11px;font-weight:600;padding:3px 9px;border:1px solid var(--olive);background:transparent;color:var(--olive);border-radius:8px;cursor:pointer">📋 Copiar</button>';
   const bloqueFactura = factura.length
     ? `<div class="sec-title">🧾 Datos de facturación ${btnCopiar}</div>` + rowHtml(factura) : '';
-  const bloqueCliente = cliente.length
-    ? `<div class="sec-title"${factura.length ? ' style="margin-top:14px"' : ''}>📋 Datos del cliente</div>` + rowHtml(cliente) : '';
+  const bloqueCliente = `<div class="sec-title"${factura.length ? ' style="margin-top:14px"' : ''}>📋 Datos del cliente <button class="sec-edit" id="f-editar">✏️ Editar</button></div>` + rowHtml(cliente);
   const bloqueDatos = bloqueFactura + bloqueCliente;
   const bloqueGrupo = e.grupo_relacionados
     ? `<div class="sec-title" style="margin-top:12px">🏨 Otros locales del mismo dueño</div>` +
@@ -773,6 +799,8 @@ async function abrirFicha(id) {
       setTimeout(() => { btnFact.textContent = '📋 Copiar'; }, 1500);
     }).catch(() => {});
   };
+  const btnEd = $('f-editar');
+  if (btnEd) btnEd.onclick = () => abrirEditar(id);
 
   // Memoria de Pipedrive
   $('f-memo').innerHTML = e.comentario
@@ -787,24 +815,33 @@ async function abrirFicha(id) {
   $('ficha').classList.remove('hidden');
 
   const [cont, tx, gest, notas] = await Promise.all([
-    sb.from('contactos').select('nombre,apellido,cargo,telefono,email,es_decisor').eq('empresa_id', id).order('es_decisor', { ascending: false }),
+    sb.from('contactos').select('id,nombre,apellido,cargo,telefono,email,es_decisor').eq('empresa_id', id).order('es_decisor', { ascending: false }),
     sb.from('transacciones').select('fecha_emision,mes,monto_neto_clp,unidades,producto,sku')
       .eq('empresa_id', id).order('fecha_emision', { ascending: false }).limit(300),
     sb.from('acciones').select('titulo,resultado,fecha_completada,tipo')
       .eq('empresa_id', id).eq('estado', 'completada')
       .order('fecha_completada', { ascending: false }).limit(5),
-    sb.from('notas').select('cuerpo,created_at').eq('empresa_id', id)
-      .order('created_at', { ascending: false }).limit(5),
+    sb.from('notas').select('id,cuerpo,tipo,created_at').eq('empresa_id', id)
+      .order('created_at', { ascending: false }).limit(80),
   ]);
 
-  // Personas de contacto
-  const filasCtc = (cont.data && cont.data.length)
-    ? cont.data.map(c => {
+  // Personas de contacto (editables / borrables)
+  FICHA_CTCS = cont.data || [];
+  const filasCtc = FICHA_CTCS.length
+    ? FICHA_CTCS.map(c => {
         const t = (c.telefono || '').replace(/[^\d+]/g, '');
         const nombreCompleto = [c.nombre, c.apellido].filter(Boolean).join(' ');
         return `<div class="ctc-row">
-          <div class="ctc-nombre">${escapeHtml(nombreCompleto)}${c.es_decisor ? ' ⭐' : ''}</div>
-          ${c.cargo ? `<div class="ctc-cargo">${escapeHtml(c.cargo)}</div>` : ''}
+          <div class="ctc-head">
+            <div style="flex:1;min-width:0">
+              <div class="ctc-nombre">${escapeHtml(nombreCompleto)}${c.es_decisor ? ' ⭐' : ''}</div>
+              ${c.cargo ? `<div class="ctc-cargo">${escapeHtml(c.cargo)}</div>` : ''}
+            </div>
+            <div class="row-actions">
+              <button class="mini-btn" data-ctc-edit="${c.id}">✏️</button>
+              <button class="mini-btn del" data-ctc-del="${c.id}">🗑</button>
+            </div>
+          </div>
           <div class="ctc-datos">
             ${c.telefono ? `<a href="tel:${t}">📞 ${escapeHtml(c.telefono)}</a>` : ''}
             ${c.email ? `<a href="mailto:${escapeHtml(c.email)}">✉️ ${escapeHtml(c.email)}</a>` : ''}
@@ -815,6 +852,8 @@ async function abrirFicha(id) {
   $('f-contactos').innerHTML = `<div class="sec-title">👤 Personas de contacto</div>` + filasCtc +
     `<button class="btn" id="f-add-ctc" style="width:100%;background:var(--cream);color:var(--navy);margin-top:6px">➕ Agregar contacto</button>`;
   $('f-add-ctc').onclick = () => abrirContacto(id);
+  $('f-contactos').querySelectorAll('[data-ctc-edit]').forEach(b => b.onclick = () => abrirEditarContacto(b.dataset.ctcEdit));
+  $('f-contactos').querySelectorAll('[data-ctc-del]').forEach(b => b.onclick = () => borrarContacto(b.dataset.ctcDel));
 
   // Historial de compras por mes — con desglose de productos al tocar
   if (tx.data && tx.data.length) {
@@ -867,11 +906,98 @@ async function abrirFicha(id) {
       </div>`).join('');
   }
 
-  $('f-notas').innerHTML = `<div class="sec-title">📝 Notas nuevas</div>` + ((notas.data && notas.data.length)
-    ? notas.data.map(n => `<div class="nota-row">${escapeHtml(n.cuerpo)}
-        <div class="f">${new Date(n.created_at).toLocaleDateString('es-CL')}</div></div>`).join('')
-    : '<div class="hint">Todavía no hay notas. Escribe la primera 👇</div>');
+  FICHA_NOTAS = notas.data || [];
+  const notaRow = n => {
+    const isPd = n.tipo === 'historica_pipedrive';
+    const fecha = new Date(n.created_at).toLocaleDateString('es-CL');
+    return `<div class="nota-row ${isPd ? 'pd' : ''}" data-nota-id="${n.id}">
+      <div class="nota-head">
+        <div class="nota-cuerpo">${escapeHtml(n.cuerpo)}</div>
+        <div class="row-actions">
+          <button class="mini-btn" data-nota-edit="${n.id}">✏️</button>
+          <button class="mini-btn del" data-nota-del="${n.id}">🗑</button>
+        </div>
+      </div>
+      <div class="f">${fecha}${isPd ? '<span class="nota-tag">Pipedrive</span>' : ''}</div>
+    </div>`;
+  };
+  $('f-notas').innerHTML = `<div class="sec-title">📝 Notas <span class="hint-inline">(historial Pipedrive + tuyas)</span></div>` +
+    (FICHA_NOTAS.length ? FICHA_NOTAS.map(notaRow).join('')
+      : '<div class="hint">Todavía no hay notas. Escribe la primera 👇</div>');
+  $('f-notas').querySelectorAll('[data-nota-edit]').forEach(b => b.onclick = () => editarNotaInline(b.dataset.notaEdit));
+  $('f-notas').querySelectorAll('[data-nota-del]').forEach(b => b.onclick = () => borrarNota(b.dataset.notaDel));
 }
+
+// ---- Editar / borrar una nota (inline) ----
+function editarNotaInline(nid) {
+  const row = document.querySelector(`[data-nota-id="${nid}"]`);
+  const n = FICHA_NOTAS.find(x => String(x.id) === String(nid));
+  if (!row || !n) return;
+  row.innerHTML = `<textarea class="nota-edit-ta" rows="5">${escapeHtml(n.cuerpo)}</textarea>
+    <div class="modal-actions" style="margin-top:8px">
+      <button class="m-cancel" data-nota-cancel>Cancelar</button>
+      <button class="m-save" data-nota-guardar>Guardar</button>
+    </div>`;
+  row.querySelector('[data-nota-cancel]').onclick = () => abrirFicha(fichaId);
+  row.querySelector('[data-nota-guardar]').onclick = async () => {
+    const nuevo = row.querySelector('.nota-edit-ta').value.trim();
+    if (!nuevo) { toast('La nota no puede quedar vacía'); return; }
+    const { error } = await sb.from('notas').update({ cuerpo: nuevo }).eq('id', nid);
+    if (error) { toast('⚠️ No se pudo guardar'); return; }
+    toast('Nota actualizada ✓');
+    abrirFicha(fichaId);
+  };
+}
+async function borrarNota(nid) {
+  if (!confirm('¿Borrar esta nota? No se puede deshacer.')) return;
+  const { error } = await sb.from('notas').delete().eq('id', nid);
+  if (error) { toast('⚠️ No se pudo borrar'); return; }
+  toast('Nota borrada');
+  abrirFicha(fichaId);
+}
+
+// ==================== EDITAR DATOS DEL CLIENTE ====================
+let edId = null;
+function abrirEditar(id) {
+  edId = id;
+  const e = EMPRESAS.find(x => x.id === id);
+  if (!e) return;
+  $('ed-sub').textContent = nombreMostrar(e);
+  $('ed-razon').value = e.razon_social || '';
+  $('ed-rut').value = e.rut || '';
+  $('ed-giro').value = e.giro || '';
+  $('ed-direccion').value = e.direccion || '';
+  $('ed-comuna').value = e.comuna || '';
+  $('ed-camas').value = (e.camas != null && e.camas !== '') ? e.camas : '';
+  $('ed-hab').value = (e.habitaciones != null && e.habitaciones !== '') ? e.habitaciones : '';
+  $('ed-comentario').value = e.comentario || '';
+  cerrarFicha();
+  $('editmodal').classList.remove('hidden');
+}
+$('ed-cancel').onclick = () => { $('editmodal').classList.add('hidden'); if (edId) abrirFicha(edId); };
+$('editmodal').onclick = (e) => { if (e.target === $('editmodal')) $('ed-cancel').onclick(); };
+$('ed-save').onclick = async () => {
+  const camas = $('ed-camas').value.trim(), hab = $('ed-hab').value.trim();
+  const patch = {
+    razon_social: $('ed-razon').value.trim() || null,
+    rut: $('ed-rut').value.trim() || null,
+    giro: $('ed-giro').value.trim() || null,
+    direccion: $('ed-direccion').value.trim() || null,
+    comuna: $('ed-comuna').value.trim() || null,
+    camas: camas === '' ? null : Number(camas),
+    habitaciones: hab === '' ? null : Number(hab),
+    comentario: $('ed-comentario').value.trim() || null,
+  };
+  $('ed-save').disabled = true;
+  const { error } = await sb.from('empresas').update(patch).eq('id', edId);
+  $('ed-save').disabled = false;
+  if (error) { toast('⚠️ No se pudo guardar: ' + error.message); return; }
+  const e = EMPRESAS.find(x => x.id === edId);
+  if (e) Object.assign(e, patch);
+  $('editmodal').classList.add('hidden');
+  toast('Datos guardados ✓');
+  abrirFicha(edId);
+};
 
 function cerrarFicha() { $('ficha').classList.add('hidden'); }
 $('f-cerrar').onclick = cerrarFicha;
@@ -1017,16 +1143,43 @@ $('t-save').onclick = async () => {
   render();
 };
 
-// ==================== AGREGAR CONTACTO ====================
+// ==================== AGREGAR / EDITAR CONTACTO ====================
 let ctcEmpId = null;
+let ctcEditId = null;   // si != null, editamos ese contacto existente
 function abrirContacto(id) {
-  ctcEmpId = id;
+  ctcEmpId = id; ctcEditId = null;
+  $('ctc-titulo').textContent = 'Agregar contacto';
   const e = EMPRESAS.find(x => x.id === id);
   $('ctc-sub').textContent = e ? nombreMostrar(e) : '';
   $('ctc-nombre').value = ''; $('ctc-cargo').value = ''; $('ctc-tel').value = ''; $('ctc-email').value = '';
   cerrarFicha();
   $('ctcmodal').classList.remove('hidden');
   setTimeout(() => $('ctc-nombre').focus(), 150);
+}
+function abrirEditarContacto(cid) {
+  const c = FICHA_CTCS.find(x => String(x.id) === String(cid));
+  if (!c) return;
+  ctcEmpId = fichaId; ctcEditId = cid;
+  $('ctc-titulo').textContent = 'Editar contacto';
+  const e = EMPRESAS.find(x => x.id === fichaId);
+  $('ctc-sub').textContent = e ? nombreMostrar(e) : '';
+  $('ctc-nombre').value = [c.nombre, c.apellido].filter(Boolean).join(' ');
+  const sel = $('ctc-cargo');
+  if (c.cargo && ![...sel.options].some(o => o.value === c.cargo || o.text === c.cargo)) {
+    const opt = document.createElement('option'); opt.textContent = c.cargo; sel.appendChild(opt);
+  }
+  sel.value = c.cargo || '';
+  $('ctc-tel').value = c.telefono || '';
+  $('ctc-email').value = c.email || '';
+  cerrarFicha();
+  $('ctcmodal').classList.remove('hidden');
+}
+async function borrarContacto(cid) {
+  if (!confirm('¿Borrar este contacto? No se puede deshacer.')) return;
+  const { error } = await sb.from('contactos').delete().eq('id', cid);
+  if (error) { toast('⚠️ No se pudo borrar'); return; }
+  toast('Contacto borrado');
+  abrirFicha(fichaId);
 }
 $('ctc-cancel').onclick = () => { $('ctcmodal').classList.add('hidden'); if (ctcEmpId) abrirFicha(ctcEmpId); };
 $('ctcmodal').onclick = (e) => { if (e.target === $('ctcmodal')) $('ctc-cancel').onclick(); };
@@ -1035,15 +1188,19 @@ $('ctc-save').onclick = async () => {
   if (!nombre) { toast('Escribe al menos el nombre'); return; }
   const cargo = $('ctc-cargo').value || null;
   const row = {
-    empresa_id: ctcEmpId, nombre, cargo,
+    nombre, apellido: null, cargo,
     telefono: $('ctc-tel').value.trim() || null,
     email: $('ctc-email').value.trim() || null,
-    es_decisor: ['Dueño(a)', 'Gerente(a)', 'Administrador(a)', 'Socio'].includes(cargo),
+    es_decisor: ['Dueño(a)', 'Gerente(a)', 'Administrador(a)', 'Socio', 'Representante Legal'].includes(cargo),
   };
-  const { error } = await sb.from('contactos').insert(row);
+  $('ctc-save').disabled = true;
+  let error;
+  if (ctcEditId) ({ error } = await sb.from('contactos').update(row).eq('id', ctcEditId));
+  else ({ error } = await sb.from('contactos').insert({ ...row, empresa_id: ctcEmpId }));
+  $('ctc-save').disabled = false;
   if (error) { toast('⚠️ No se pudo guardar'); return; }
   $('ctcmodal').classList.add('hidden');
-  toast('Contacto guardado ✓');
+  toast(ctcEditId ? 'Contacto actualizado ✓' : 'Contacto guardado ✓');
   if (ctcEmpId) abrirFicha(ctcEmpId);
 };
 
