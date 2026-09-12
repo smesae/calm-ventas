@@ -1,4 +1,4 @@
-// CALM B2B — Lógica de la PWA (v0.3: Agenda + recordatorios + memoria Pipedrive)
+// CALM B2B — Lógica de la PWA (v0.4: alta de cliente nuevo + edición + memoria Pipedrive)
 'use strict';
 
 const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.CALM_CONFIG;
@@ -1202,6 +1202,62 @@ $('ctc-save').onclick = async () => {
   $('ctcmodal').classList.add('hidden');
   toast(ctcEditId ? 'Contacto actualizado ✓' : 'Contacto guardado ✓');
   if (ctcEmpId) abrirFicha(ctcEmpId);
+};
+
+// ==================== NUEVO CLIENTE ====================
+const NC_IDS = ['nc-nombre','nc-canal','nc-tel','nc-email','nc-razon','nc-rut','nc-giro',
+  'nc-direccion','nc-comuna','nc-camas','nc-hab','nc-grupo','nc-comentario',
+  'nc-ctc-nombre','nc-ctc-cargo','nc-ctc-tel'];
+
+function abrirNuevo() {
+  NC_IDS.forEach(id => { const el = $(id); if (el) el.value = ''; });
+  $('nuevomodal').classList.remove('hidden');
+  setTimeout(() => $('nc-nombre').focus(), 150);
+}
+$('fab-nuevo').onclick = abrirNuevo;
+$('nc-cancel').onclick = () => $('nuevomodal').classList.add('hidden');
+$('nuevomodal').onclick = (e) => { if (e.target === $('nuevomodal')) $('nuevomodal').classList.add('hidden'); };
+
+$('nc-save').onclick = async () => {
+  const nombre = $('nc-nombre').value.trim();
+  if (!nombre) { toast('Escribe al menos el nombre del cliente'); $('nc-nombre').focus(); return; }
+  const camas = $('nc-camas').value.trim(), hab = $('nc-hab').value.trim();
+  const row = {
+    nombre,
+    canal: $('nc-canal').value || null,
+    telefono: $('nc-tel').value.trim() || null,
+    email: $('nc-email').value.trim() || null,
+    razon_social: $('nc-razon').value.trim() || null,
+    rut: $('nc-rut').value.trim() || null,
+    giro: $('nc-giro').value.trim() || null,
+    direccion: $('nc-direccion').value.trim() || null,
+    comuna: $('nc-comuna').value.trim() || null,
+    camas: camas === '' ? null : Number(camas),
+    habitaciones: hab === '' ? null : Number(hab),
+    grupo_relacionados: $('nc-grupo').value.trim() || null,
+    comentario: $('nc-comentario').value.trim() || null,
+  };
+  $('nc-save').disabled = true;
+  const { data, error } = await sb.from('empresas').insert(row).select('id').single();
+  if (error || !data) { $('nc-save').disabled = false; toast('⚠️ No se pudo crear: ' + (error ? error.message : '')); return; }
+  const nuevoId = data.id;
+
+  // Primer contacto (opcional)
+  const cNom = $('nc-ctc-nombre').value.trim();
+  if (cNom) {
+    const cargo = $('nc-ctc-cargo').value || null;
+    await sb.from('contactos').insert({
+      empresa_id: nuevoId, nombre: cNom, apellido: null, cargo,
+      telefono: $('nc-ctc-tel').value.trim() || null, email: null,
+      es_decisor: ['Dueño(a)', 'Gerente(a)', 'Administrador(a)', 'Socio', 'Representante Legal'].includes(cargo),
+    });
+  }
+
+  $('nc-save').disabled = false;
+  $('nuevomodal').classList.add('hidden');
+  toast('Cliente creado ✓');
+  await cargar();          // recarga la base con el nuevo cliente
+  abrirFicha(nuevoId);     // abre su ficha para sumar más contactos, notas y recordatorios
 };
 
 // ==================== TABS + BUSCADOR ====================
