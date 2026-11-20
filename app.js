@@ -1,4 +1,4 @@
-// CALM B2B — Lógica de la PWA (v0.4: alta de cliente nuevo + edición + memoria Pipedrive)
+// CALM B2B — Lógica de la PWA (v0.5: recuperar contraseña + alta de cliente nuevo + edición)
 'use strict';
 
 const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.CALM_CONFIG;
@@ -96,16 +96,31 @@ function showMsg(t, tipo) {
   m.textContent = t; m.className = 'msg ' + tipo; m.classList.remove('hidden');
 }
 function traducirError(m) {
-  if (/invalid login/i.test(m)) return 'Correo o contraseña incorrectos';
-  if (/not confirmed/i.test(m)) return 'Tu correo aún no está confirmado. Revisa tu bandeja.';
+  if (/invalid login/i.test(m)) return 'Correo o contraseña incorrectos. Si no la recuerdas, toca "¿Olvidaste tu contraseña?".';
+  if (/not confirmed/i.test(m)) return 'Tu correo aún no está confirmado. Revisa tu bandeja (y spam).';
   if (/already registered/i.test(m)) return 'Ese correo ya tiene cuenta. Usa "Entrar".';
-  if (/at least 6/i.test(m)) return 'La contraseña debe tener al menos 6 caracteres';
+  if (/at least 6|should be at least/i.test(m)) return 'La contraseña debe tener al menos 6 caracteres';
+  if (/different from the old|should be different/i.test(m)) return 'La nueva contraseña debe ser distinta a la anterior.';
+  if (/rate limit|only request this after|too many|for security purposes/i.test(m)) return 'Espera un par de minutos antes de volver a intentar (límite de correos).';
   return m;
 }
 
 $('logout').onclick = () => sb.auth.signOut();
 
-sb.auth.onAuthStateChange((_e, session) => {
+// Mientras Maca fija su nueva contraseña desde el enlace del correo, NO hay que saltar a la app.
+let enRecuperacion = false;
+function entrarModoRecuperacion() {
+  enRecuperacion = true;
+  $('app').classList.add('hidden');
+  $('login').classList.remove('hidden');
+  $('li-normal').classList.add('hidden');
+  $('li-recovery').classList.remove('hidden');
+  showMsg('Escribe tu nueva contraseña para entrar.', 'ok');
+}
+
+sb.auth.onAuthStateChange((evento, session) => {
+  if (evento === 'PASSWORD_RECOVERY') { entrarModoRecuperacion(); return; }
+  if (enRecuperacion) return;   // no entrar todavía: está creando su clave nueva
   if (session) {
     $('login').classList.add('hidden');
     $('app').classList.remove('hidden');
@@ -115,6 +130,41 @@ sb.auth.onAuthStateChange((_e, session) => {
     $('login').classList.remove('hidden');
   }
 });
+
+// Si la página se abrió desde el enlace del correo de recuperación, prepararse de inmediato
+// (evita que un evento de sesión temprano la meta a la app antes de fijar la clave).
+if (/type=recovery/.test(window.location.hash)) entrarModoRecuperacion();
+
+// ---- ¿Olvidaste tu contraseña? → enviar correo de recuperación ----
+$('li-reset').onclick = async (e) => {
+  e.preventDefault();
+  const email = $('li-email').value.trim();
+  if (!email) { showMsg('Primero escribe tu correo arriba y vuelve a tocar el enlace', 'err'); $('li-email').focus(); return; }
+  $('li-reset').style.pointerEvents = 'none';
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + window.location.pathname,
+  });
+  $('li-reset').style.pointerEvents = '';
+  if (error) { showMsg(traducirError(error.message), 'err'); return; }
+  showMsg('📩 Te enviamos un correo a ' + email + '. Ábrelo (revisa también spam) y toca el enlace para crear tu nueva contraseña.', 'ok');
+};
+
+// ---- Fijar la nueva contraseña (al volver desde el enlace del correo) ----
+$('li-newpass-btn').onclick = async () => {
+  const pass = $('li-newpass').value;
+  if (!pass || pass.length < 6) { showMsg('La contraseña debe tener al menos 6 caracteres', 'err'); return; }
+  $('li-newpass-btn').disabled = true;
+  const { error } = await sb.auth.updateUser({ password: pass });
+  $('li-newpass-btn').disabled = false;
+  if (error) { showMsg(traducirError(error.message), 'err'); return; }
+  enRecuperacion = false;
+  $('li-recovery').classList.add('hidden');
+  $('li-normal').classList.remove('hidden');
+  $('li-msg').classList.add('hidden');
+  $('login').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  cargar();
+};
 
 // ==================== DATA ====================
 // Trae TODAS las empresas paginando (Supabase devuelve máx 1.000 por consulta).

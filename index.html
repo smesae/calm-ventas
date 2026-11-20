@@ -358,18 +358,30 @@
       <div class="logo">CALM</div>
       <div class="tag">Ventas B2B</div>
     </div>
-    <div class="field">
-      <label>Correo</label>
-      <input id="li-email" type="email" autocomplete="email" placeholder="tu@holacalm.cl">
+    <div id="li-normal">
+      <div class="field">
+        <label>Correo</label>
+        <input id="li-email" type="email" autocomplete="email" placeholder="tu@holacalm.cl">
+      </div>
+      <div class="field">
+        <label>Contraseña</label>
+        <input id="li-pass" type="password" autocomplete="current-password" placeholder="••••••••">
+      </div>
+      <button id="li-btn" class="login-btn">Entrar</button>
+      <div class="login-alt" style="margin-top:12px">
+        <a id="li-reset" href="#">¿Olvidaste tu contraseña?</a>
+      </div>
+      <div class="login-alt" style="margin-top:8px">
+        <span id="li-toggle-txt">¿Primera vez? </span>
+        <a id="li-toggle" href="#">Crear cuenta</a>
+      </div>
     </div>
-    <div class="field">
-      <label>Contraseña</label>
-      <input id="li-pass" type="password" autocomplete="current-password" placeholder="••••••••">
-    </div>
-    <button id="li-btn" class="login-btn">Entrar</button>
-    <div class="login-alt">
-      <span id="li-toggle-txt">¿Primera vez? </span>
-      <a id="li-toggle" href="#">Crear cuenta</a>
+    <div id="li-recovery" class="hidden">
+      <div class="field">
+        <label>Crea tu nueva contraseña</label>
+        <input id="li-newpass" type="password" autocomplete="new-password" placeholder="Mínimo 6 caracteres">
+      </div>
+      <button id="li-newpass-btn" class="login-btn">Guardar y entrar</button>
     </div>
     <div id="li-msg" class="msg hidden"></div>
   </div>
@@ -671,6 +683,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="config.js?v=11"></script>
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>
