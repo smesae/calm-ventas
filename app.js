@@ -133,7 +133,7 @@ sb.auth.onAuthStateChange((evento, session) => {
 
 // Si la página se abrió desde el enlace del correo de recuperación, prepararse de inmediato
 // (evita que un evento de sesión temprano la meta a la app antes de fijar la clave).
-if (/type=recovery/.test(window.location.hash)) entrarModoRecuperacion();
+if (/type=recovery/.test(window.location.hash) || /type=recovery/.test(window.location.search)) entrarModoRecuperacion();
 
 // ---- ¿Olvidaste tu contraseña? → enviar correo de recuperación ----
 $('li-reset').onclick = async (e) => {
@@ -141,9 +141,13 @@ $('li-reset').onclick = async (e) => {
   const email = $('li-email').value.trim();
   if (!email) { showMsg('Primero escribe tu correo arriba y vuelve a tocar el enlace', 'err'); $('li-email').focus(); return; }
   $('li-reset').style.pointerEvents = 'none';
-  const { error } = await sb.auth.resetPasswordForEmail(email, {
-    redirectTo: window.location.origin + window.location.pathname,
-  });
+  // URL de retorno FIJA a la app publicada. No derivarla de window.location: dentro de
+  // navegadores embebidos (WhatsApp, etc.) el origin puede salir como "null" y el enlace
+  // del correo termina apuntando a "null" (error "null es inaccesible").
+  const urlApp = (location.origin && location.origin.startsWith('http') && location.hostname !== 'localhost')
+    ? location.origin + location.pathname
+    : 'https://smesae.github.io/calm-ventas/';
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: urlApp });
   $('li-reset').style.pointerEvents = '';
   if (error) { showMsg(traducirError(error.message), 'err'); return; }
   showMsg('📩 Te enviamos un correo a ' + email + '. Ábrelo (revisa también spam) y toca el enlace para crear tu nueva contraseña.', 'ok');
